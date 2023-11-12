@@ -32,6 +32,11 @@ class InputOutput:
         """What is the index of this Input/Output"""
         return self._index
 
+    @property
+    def volume(self) -> int:
+        """What is the volume of this Input/Output"""
+        return self._volume
+
     def _process_event(self, parts: "list[str]"):
         if parts[0] == "EN":
             self._enabled = True
@@ -201,6 +206,13 @@ class ACMax24:
         await self._transport.send(f'SET OUT{output_idx} AS IN{input_idx}\r')
         await self._transport.send(f'SET OUT{output_idx} AS IN{input_idx}\r')
 
+    def get_enabled_inputs(self) -> "set[Input]":
+        """Return a set of all enabled Inputs"""
+        return set([input for input in self._inputs if input.enabled])
+
+    def get_enabled_outputs(self) -> "set[Output]":
+        """Return a set of all enabled Outputs"""
+        return set([output for output in self._outputs if input.enabled])
 
     def get_input(self, idx: int) -> Input:
         if idx < 1 or idx > INPUT_MAX:
