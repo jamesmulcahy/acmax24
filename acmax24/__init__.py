@@ -156,7 +156,11 @@ class Transport:
             await self.refresh()
 
     async def refresh(self):
-        await self.send("GET CONFIG\r")
+        try:
+            await self.send("GET CONFIG\r")
+        except Exception:
+            logging.error("Couldn't refresh configuration")
+            pass
 
     def send(self, message: str):
         if self.socket:
