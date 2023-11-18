@@ -236,6 +236,8 @@ class ACMax24:
 
     async def _refresh_labels(self):
         """Refetch the Input and Output labels from the AX Mac Pro HTTP API"""
+        # TODO: Move to using async http library
+        return
         while True:
             try:
                 resp = requests.get(f"http://{self._hostname}/do?cmd=status")
