@@ -171,8 +171,7 @@ class Transport:
                 async for message in websocket:
                     await self.process(message)
             except websockets.ConnectionClosed:
-                # TODO: Does it re-connect?
-                LOG.error("websocket closed")
+                LOG.warn("websocket closed, connect will automatically restablish")
                 continue
 
     def stop(self):
