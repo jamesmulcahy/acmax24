@@ -173,7 +173,7 @@ class Transport:
             except websockets.ConnectionClosed:
                 LOG.warn("websocket closed, connect will automatically restablish")
                 continue
-            except e:
+            except Exception as e:
                 LOG.error(f"received error: {e}; ignoring")
                 continue
 
