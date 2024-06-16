@@ -173,6 +173,9 @@ class Transport:
             except websockets.ConnectionClosed:
                 LOG.warn("websocket closed, connect will automatically restablish")
                 continue
+            except e:
+                LOG.error(f"received error: {e}; ignoring")
+                continue
 
     def stop(self):
         self._refresh_task.cancel()
