@@ -1,5 +1,6 @@
 import time, threading
 import asyncio
+import copy
 import json
 import requests
 import websockets
@@ -302,7 +303,8 @@ class ACMax24:
                 LOG.debug("Sending: '%s'", cmd)
                 await self._transport.send(cmd)
             except Exception as e:
-                LOG.warn("Exception: %s", e)
+                LOG.warn("Exception when sending command. cmd='%s', exception='%s'", cmd, e)
+                pass
 
 
     def get_enabled_inputs(self) -> "set[Input]":
@@ -383,6 +385,27 @@ class ACMax24:
                 res += "OUT" + str(output.index) + ": " + str(output) + "\n"
 
         return res
-
     
+    async def save_state(self):
+        """Returns a dictionary containing the current state of the inputs/outputs, which can be restored
+        using restore_state()"""
+        state = {}
+        state['inputs'] = copy.deepcopy(self._inputs)
+        state['outputs'] = copy.deepcopy(self._outputs)
+        return state
+    
+    async def restore_state(self, state):
+        """Takes a state dump, as returned by save_state(), and makes the system match the supplied state"""
+        saved_input: Input
+        for saved_input in state['inputs']:
+            # Nothing to implement for inputs right now...
+            pass
 
+        saved_output: Output
+        for saved_output in state['outputs']:
+            LOG.debug("Restoring saved output: %s", saved_output)
+            # We assume that enabled/disabled isn't changed between save/restore (since we don't support that)
+            if saved_output.enabled:
+                await self.mute_output(saved_output.index, saved_output.muted)
+                await self.set_output_volume(saved_output.index, saved_output.volume)
+                await self.change_input_for_output(saved_output.index, saved_output.input_channel)
