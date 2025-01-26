@@ -3,6 +3,7 @@ import asyncio
 import copy
 import json
 import requests
+import websockets.legacy.client
 import websockets
 import logging
 import threading
@@ -161,7 +162,7 @@ class Transport:
         LOG.debug(f"Establishing websocket connection to {self._hostname}")
         self._refresh_task = asyncio.create_task(self.refresh())
 
-        async for websocket in websockets.connect(
+        async for websocket in websockets.legacy.client.connect(
             uri=f"ws://{self._hostname}/ws/uart"
         ):
             self.socket = websocket
