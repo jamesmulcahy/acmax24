@@ -217,6 +217,7 @@ class ACMax24:
         self._initial_io_config_received: bool = False
         self._initial_labels_fetched: bool = False
         self._notify_callback = notify_callback
+        self._errors = 0
 
     async def start(self):
         """Start sets up the async/background tasks"""
@@ -365,6 +366,7 @@ class ACMax24:
         elif parts[0] == 'CMD' and parts[1] == 'ERROR':
             # The API has some quirks and sends this a lot, even for seemingly valid commands
             LOG.debug("Received CMD ERROR")
+            self._errors = self._errors + 1
         else:
             #LOG.debug("Ignoring event: %s", msg.strip("\r\n"))
             pass
