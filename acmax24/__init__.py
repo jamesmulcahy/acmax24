@@ -43,29 +43,33 @@ class InputOutput:
         return self._volume
 
     def _process_event(self, parts: "list[str]"):
-        if parts[0] == "EN":
-            self._enabled = True
-        elif parts[0] == "DIS":
-            self._enabled = False
-        elif parts[0] == "VOL":
-            if "LOCK" not in parts[1]:
-                self._volume = int(parts[1])
+        try:
+            if parts[0] == "EN":
+                self._enabled = True
+            elif parts[0] == "DIS":
+                self._enabled = False
+            elif parts[0] == "VOL":
+                if "LOCK" not in parts[1]:
+                    self._volume = int(parts[1])
+                else:
+            # The following only occur for outputs.......
+                    self._set_volume_lock(not ("UNLOCK" in parts[1]))
+            elif parts[0] == "MUTE":
+                self._set_muted(True)
+            elif parts[0] == "UNMUTE":
+                self._set_muted(False)
+            elif parts[0] == "AS":
+                self._set_input_channel(int(parts[1].strip("IN")))
+            elif parts[0] == 'EQ':
+                self._set_eq(int(parts[1]))
+            elif parts[0] == 'BAL':
+                self._set_balance(int(parts[1]))
             else:
-        # The following only occur for outputs.......
-                self._set_volume_lock(not ("UNLOCK" in parts[1]))
-        elif parts[0] == "MUTE":
-            self._set_muted(True)
-        elif parts[0] == "UNMUTE":
-            self._set_muted(False)
-        elif parts[0] == "AS":
-            self._set_input_channel(int(parts[1].strip("IN")))
-        elif parts[0] == 'EQ':
-            self._set_eq(int(parts[1]))
-        elif parts[0] == 'BAL':
-            self._set_balance(int(parts[1]))
-        else:
-            #LOG.debug('Ignoring update: %s', str(parts))
-            pass
+                #LOG.debug('Ignoring update: %s', str(parts))
+                pass
+        except ValueError:
+            LOG.debug("ignoring event with non-integer value: %s", parts)
+            return
 
         if self.enabled:
             LOG.debug(f"IO {self} ===> Processed event {parts}")
@@ -147,7 +151,10 @@ class Input(InputOutput):
 
     def _process_event(self, parts: "list[str]"):
         if parts[0] == 'SIG' and len(parts) >= 3 and parts[1] == 'STA':
-            self._signal_status = int(parts[2])
+            try:
+                self._signal_status = int(parts[2])
+            except ValueError:
+                LOG.debug("ignoring SIG STA event with non-integer value: %s", parts)
         else:
             super()._process_event(parts)
     
