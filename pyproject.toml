@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "acmax24"
-version = "0.2.7"
+version = "0.2.8"
 description = "Python library for AVPro Edge AC-MAX-24 Audio Matrix"
 authors = ["James Mulcahy <james@manque.net>"]
 license = "Apache 2.0"
@@ -12,6 +12,10 @@ websockets = "^15.0"
 requests = "^2.31.0"
 asyncio = "^3.4.3"
 
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.0"
+pytest-asyncio = "^0.23"
 
 [build-system]
 requires = ["poetry-core"]

@@ -133,6 +133,23 @@ class Output(InputOutput):
 class Input(InputOutput):
     def __init__(self, index: int):
         super().__init__(index)
+        self._signal_status: int = 0
+
+    @property
+    def signal_status(self) -> int:
+        """Signal status bitmask: 0=silent, 1=left, 2=right, 3=both"""
+        return self._signal_status
+
+    @property
+    def has_audio(self) -> bool:
+        """True if any audio is detected on this input"""
+        return self._signal_status > 0
+
+    def _process_event(self, parts: "list[str]"):
+        if parts[0] == 'SIG' and len(parts) >= 3 and parts[1] == 'STA':
+            self._signal_status = int(parts[2])
+        else:
+            super()._process_event(parts)
     
 # Transport is responsible for communicating with the AC-MAX-24 API.  The idea here
 # is that we can drop in another Transport for testing purposes, though there are
@@ -167,8 +184,9 @@ class Transport:
         ):
             self.socket = websocket
             # For some reason, one request isn't always enough, the first will often return 'CMD ERROR'
-            await self.refresh()           
-            await self.refresh()           
+            await self.refresh()
+            await self.refresh()
+            await self.refresh_signal_status()
             try:
                 async for message in websocket:
                     await self.process(message)
@@ -191,6 +209,12 @@ class Transport:
     async def refresh(self):
         try:
             await self.send("GET CONFIG\r")
+        except Exception:
+            pass
+
+    async def refresh_signal_status(self):
+        try:
+            await self.send("GET IN0 SIG STA\r")
         except Exception:
             pass
 
@@ -361,6 +385,10 @@ class ACMax24:
         if len(parts) > 1 and parts[0].startswith('OUT'):
             # For some reason, in addition to 'SET OUTxx AS INyyy', the API also sends those updates without
             # the 'SET' prefix; and we handle those here.
+            updated_io = self._get_io(parts[0])
+            updated_io._process_event(parts[1:])
+        elif len(parts) > 1 and parts[0].startswith('IN'):
+            # Signal status events arrive as 'IN3 SIG STA 3' (no SET prefix)
             updated_io = self._get_io(parts[0])
             updated_io._process_event(parts[1:])
         elif parts[0] == 'CMD' and parts[1] == 'ERROR':
