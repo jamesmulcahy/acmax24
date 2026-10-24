@@ -100,14 +100,11 @@ async def test_ignored_events_dont_notify_or_raise(configured_matrix, notificati
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(strict=True, reason="BUG: out-of-range index raises IndexError, which the transport "
-                                       "loop treats as a fatal error and reconnects")
 async def test_out_of_range_event_is_ignored(configured_matrix):
     await configured_matrix._process_event("SET OUT25 VOL 10\r\n")
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(strict=True, reason="BUG: bare 'CMD' message raises IndexError on parts[1]")
 async def test_bare_cmd_message_is_ignored(configured_matrix):
     await configured_matrix._process_event("CMD\r\n")
 
@@ -184,8 +181,6 @@ async def test_restore_state_replays_enabled_outputs_only(matrix):
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(strict=True, reason="BUG: an enabled output with no known input (input_channel=-1) "
-                                       "raises IndexError and aborts restoring every later output")
 async def test_restore_state_continues_past_unrouted_output(matrix):
     await matrix._process_event("SET OUT1 EN\r\n")  # never received an AS event
     await _setup_output(matrix, 2, 30, 3, False)
@@ -195,6 +190,20 @@ async def test_restore_state_continues_past_unrouted_output(matrix):
     await matrix.restore_state(state)
 
     assert "SET OUT2 AS IN3\r\n" in matrix._transport.sent
+    assert not any(m.startswith("SET OUT1 AS") for m in matrix._transport.sent)
+
+
+@pytest.mark.asyncio
+async def test_restore_state_skips_unknown_volume(matrix):
+    await matrix._process_event("SET OUT1 EN\r\n")
+    await matrix._process_event("SET OUT1 AS IN2\r\n")  # never received a VOL event
+    state = await matrix.save_state()
+    matrix._transport.sent.clear()
+
+    await matrix.restore_state(state)
+
+    assert not any("VOL" in m for m in matrix._transport.sent)
+    assert "SET OUT1 AS IN2\r\n" in matrix._transport.sent
 
 
 # --- Initial state / label fetch ---
@@ -242,12 +251,15 @@ async def test_wait_for_initial_state(matrix):
         assert await matrix.wait_for_initial_state(2) is True
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: ACMax24.stop() references self._refresh_task, which is never set")
 def test_stop(matrix):
     matrix.stop()
 
 
 # --- Transport ---
+
+def test_transport_stop_before_start():
+    Transport("matrix.invalid", None).stop()
+
 
 def test_transport_send_without_socket_raises():
     t = Transport("matrix.invalid", None)
@@ -274,8 +286,6 @@ async def test_transport_process_forwards_to_callback():
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(strict=True, reason="BUG: transport_thread_runloop schedules refresh() once instead of "
-                                       "refresh_task(), so the periodic GET CONFIG never runs")
 async def test_transport_schedules_periodic_refresh():
     t = Transport("matrix.invalid", None)
     scheduled = []

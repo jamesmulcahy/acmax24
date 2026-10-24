@@ -168,6 +168,8 @@ class Transport:
         self.socket = None
         self._hostname = hostname
         self._callback = callback
+        self._loop = None
+        self._refresh_task = None
 
     async def start(self):
         LOG.debug("Spawning transport thread")
@@ -184,7 +186,8 @@ class Transport:
     async def transport_thread_runloop(self):
         LOG.debug("Transport thread started")
         LOG.debug(f"Establishing websocket connection to {self._hostname}")
-        self._refresh_task = asyncio.create_task(self.refresh())
+        self._loop = asyncio.get_running_loop()
+        self._refresh_task = asyncio.create_task(self.refresh_task())
 
         async for websocket in websockets.legacy.client.connect(
             uri=f"ws://{self._hostname}/ws/uart"
@@ -201,12 +204,14 @@ class Transport:
                 LOG.warn("websocket closed, connect will automatically restablish")
                 continue
             except Exception as e:
-                LOG.error(f"received error: {e}; ignoring")
+                LOG.exception(f"received error: {e}; ignoring")
                 continue
 
     def stop(self):
-        self._refresh_task.cancel()
-        
+        # The refresh task lives on the transport thread's loop, so cancel it from there
+        if self._refresh_task and self._loop:
+            self._loop.call_soon_threadsafe(self._refresh_task.cancel)
+
     async def refresh_task(self):
         """This is used to periodically pull all state from the device, to reconcile and catch any changes we missed"""
         while True:
@@ -295,7 +300,6 @@ class ACMax24:
                 LOG.warn("Failed to fetch status from matrix, got exception: %s", e)
 
     def stop(self):
-        self._refresh_task.cancel()
         self._transport.stop()
 
     async def change_input_for_output(self, output_idx: int, input_idx: int):
@@ -370,6 +374,19 @@ class ACMax24:
 
     async def _process_event(self, msg: str):
         """Process updates from the uart websocket"""
+        try:
+            updated_io = self._apply_event(msg)
+        except (IndexError, ValueError):
+            # Malformed or out-of-range events must not propagate, or the transport loop reconnects
+            LOG.debug("Ignoring malformed event: %s", msg.strip("\r\n"))
+            return
+
+        if updated_io and self._initial_io_config_received:
+            LOG.debug("Triggering notify callback following change to IO: %s", updated_io)
+            await self._notify_callback()
+
+    def _apply_event(self, msg: str) -> InputOutput:
+        """Apply a single websocket message to our state, returning the Input/Output it changed, if any"""
         parts = msg.strip("\r\n").split(" ")
         # We don't do anything with these types of event
         ignored_update_types = ['TRIGGER', 'RIP', 'HIP', 'NMK', 'TIP', 'FOLLOW', 'SIG', 'ADDR', 'BAUDR']
@@ -398,7 +415,7 @@ class ACMax24:
             # Signal status events arrive as 'IN3 SIG STA 3' (no SET prefix)
             updated_io = self._get_io(parts[0])
             updated_io._process_event(parts[1:])
-        elif parts[0] == 'CMD' and parts[1] == 'ERROR':
+        elif len(parts) > 1 and parts[0] == 'CMD' and parts[1] == 'ERROR':
             # The API has some quirks and sends this a lot, even for seemingly valid commands
             LOG.debug("Received CMD ERROR")
             self._errors = self._errors + 1
@@ -406,10 +423,7 @@ class ACMax24:
             #LOG.debug("Ignoring event: %s", msg.strip("\r\n"))
             pass
 
-        if updated_io and self._initial_io_config_received:
-            LOG.debug("Triggering notify callback following change to IO: %s", updated_io)
-            await self._notify_callback()
-            pass
+        return updated_io
 
 
     def __str__(self) -> str:
@@ -445,5 +459,10 @@ class ACMax24:
             # We assume that enabled/disabled isn't changed between save/restore (since we don't support that)
             if saved_output.enabled:
                 await self.mute_output(saved_output.index, saved_output.muted)
-                await self.set_output_volume(saved_output.index, saved_output.volume)
-                await self.change_input_for_output(saved_output.index, saved_output.input_channel)
+                # Volume/input are -1 if we never heard them from the device; skip rather than send garbage
+                if saved_output.volume >= 0:
+                    await self.set_output_volume(saved_output.index, saved_output.volume)
+                if 1 <= saved_output.input_channel <= INPUT_MAX:
+                    await self.change_input_for_output(saved_output.index, saved_output.input_channel)
+                else:
+                    LOG.warning("Not restoring input for OUT%d, input unknown at snapshot time", saved_output.index)
