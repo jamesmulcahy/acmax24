@@ -201,7 +201,7 @@ class Transport:
                 LOG.warn("websocket closed, connect will automatically restablish")
                 continue
             except Exception as e:
-                LOG.error(f"received error: {e}; ignoring")
+                LOG.exception(f"received error: {e}; ignoring")
                 continue
 
     def stop(self):
