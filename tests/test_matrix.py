@@ -261,10 +261,11 @@ def test_transport_stop_before_start():
     Transport("matrix.invalid", None).stop()
 
 
-def test_transport_send_without_socket_raises():
+@pytest.mark.asyncio
+async def test_transport_send_without_socket_raises():
     t = Transport("matrix.invalid", None)
-    with pytest.raises(Exception, match="not connected"):
-        t.send("GET CONFIG\r")
+    with pytest.raises(ConnectionError, match="not connected"):
+        await t.send("GET CONFIG\r")
 
 
 @pytest.mark.asyncio
