@@ -3,6 +3,8 @@ name: Publish to PyPI
 on:
   push:
     tags: ["v*"]
+  # Dispatched on the new tag by tag-release.yml after a version bump merges
+  workflow_dispatch:
 
 jobs:
   build:
