@@ -11,6 +11,7 @@ import threading
 INPUT_MAX = 24
 OUTPUT_MAX = 24
 REFRESH_INTERVAL = 60
+SEND_TIMEOUT = 5
 
 LOG: logging.Logger = logging.getLogger(__package__)
 
@@ -170,6 +171,10 @@ class Transport:
         self._callback = callback
         self._loop = None
         self._refresh_task = None
+        # Connection health metrics
+        self.reconnects: int = 0
+        self.last_connected: float = None
+        self.last_disconnect_reason: str = None
 
     async def start(self):
         LOG.debug("Spawning transport thread")
@@ -192,20 +197,44 @@ class Transport:
         async for websocket in websockets.legacy.client.connect(
             uri=f"ws://{self._hostname}/ws/uart"
         ):
-            self.socket = websocket
+            await self._run_connection(websocket)
+
+    async def _run_connection(self, websocket):
+        """Service one websocket connection until it closes. Returning lets connect() reconnect."""
+        if self.last_connected is not None:
+            self.reconnects += 1
+            LOG.info("websocket reconnected to %s (reconnect #%d, last disconnect: %s)",
+                     self._hostname, self.reconnects, self.last_disconnect_reason)
+        else:
+            LOG.info("websocket connected to %s", self._hostname)
+        self.last_connected = time.time()
+        self.socket = websocket
+        try:
             # For some reason, one request isn't always enough, the first will often return 'CMD ERROR'
             await self.refresh()
             await self.refresh()
             await self.refresh_signal_status()
-            try:
-                async for message in websocket:
+            async for message in websocket:
+                try:
                     await self.process(message)
-            except websockets.ConnectionClosed:
-                LOG.warn("websocket closed, connect will automatically restablish")
-                continue
-            except Exception as e:
-                LOG.exception(f"received error: {e}; ignoring")
-                continue
+                except Exception:
+                    # A bad message or a failing callback must not cost us the connection
+                    LOG.exception("error processing message %r; ignoring", message)
+            self.last_disconnect_reason = "closed by peer"
+        except websockets.ConnectionClosed as e:
+            self.last_disconnect_reason = f"connection closed: {e}"
+            LOG.warning("websocket closed (%s), reconnecting", e)
+        except Exception as e:
+            self.last_disconnect_reason = f"error: {e!r}"
+            LOG.exception("websocket error, reconnecting")
+        finally:
+            # Clear the socket first so commands sent during the reconnect fail fast
+            # instead of being written to a dead connection.
+            self.socket = None
+            try:
+                await websocket.close()
+            except Exception:
+                pass
 
     def stop(self):
         # The refresh task lives on the transport thread's loop, so cancel it from there
@@ -230,12 +259,22 @@ class Transport:
         except Exception:
             pass
 
-    def send(self, message: str):
-        if self.socket:
-            return self.socket.send(message)
+    async def send(self, message: str):
+        """Send a message on the websocket. Safe to call from any event loop/thread: the write
+        always runs on the transport thread's loop, which owns the socket."""
+        socket, loop = self.socket, self._loop
+        if socket is None or loop is None:
+            LOG.warning("Cannot send '%s' as socket not connected", message.strip("\r\n"))
+            raise ConnectionError(f"cannot send {message.strip()!r}, socket not connected")
+        if asyncio.get_running_loop() is loop:
+            await socket.send(message)
         else:
-            LOG.warn("Cannot send '%s' as socket not connected", message.strip("\r").strip("\n"))
-            raise Exception("cannot send '%s', as socket not connected", message)
+            future = asyncio.run_coroutine_threadsafe(socket.send(message), loop)
+            try:
+                await asyncio.wait_for(asyncio.wrap_future(future), SEND_TIMEOUT)
+            except asyncio.TimeoutError:
+                future.cancel()
+                raise
 
     async def process(self, message):
         # print("Received: " + message)
@@ -301,6 +340,21 @@ class ACMax24:
 
     def stop(self):
         self._transport.stop()
+
+    @property
+    def errors(self) -> int:
+        """Number of 'CMD ERROR' responses received from the device"""
+        return self._errors
+
+    @property
+    def reconnects(self) -> int:
+        """Number of times the websocket has reconnected since start"""
+        return getattr(self._transport, "reconnects", 0)
+
+    @property
+    def connected(self) -> bool:
+        """Is the websocket currently connected?"""
+        return getattr(self._transport, "socket", None) is not None
 
     async def change_input_for_output(self, output_idx: int, input_idx: int):
         """Map the given output, to the given input"""
